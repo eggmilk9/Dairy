@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="일기">
+  <meta name="theme-color" content="#F2EEE7">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.png">
+  <title>오늘의 일기</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@300;400;600&family=Noto+Sans+KR:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+    html,body{height:100%}
+    body{
+      font-family:'Noto Sans KR',-apple-system,sans-serif;
+      background:#F2EEE7;
+      padding-top:env(safe-area-inset-top);
+      overscroll-behavior:none;
+    }
+    button{-webkit-user-select:none;user-select:none;touch-action:manipulation}
+    textarea{-webkit-user-select:text;user-select:text}
+
+    .wrap{
+      min-height:100dvh;
+      display:flex;align-items:flex-start;justify-content:center;
+      padding:24px 16px calc(28px + env(safe-area-inset-bottom));
+      background:#F2EEE7;
+    }
+    .card{
+      background:#FAF8F3;border-radius:20px;
+      padding:24px 22px 18px;
+      width:100%;max-width:440px;
+      box-shadow:0 2px 20px rgba(44,40,36,.07);
+    }
+
+    /* Header */
+    .hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px}
+    .date-label{font-size:10px;color:#C8A87A;letter-spacing:.1em;font-weight:500;margin-bottom:5px}
+    .date-main{font-family:'Noto Serif KR',serif;font-size:14px;color:#9B9089}
+
+    /* Buttons */
+    .icon-btn{
+      background:none;border:none;cursor:pointer;color:#B0A49A;
+      padding:8px;border-radius:10px;
+      display:flex;align-items:center;justify-content:center;
+      transition:color .15s,background .15s;
+      min-width:44px;min-height:44px;
+    }
+    .icon-btn:active{color:#2A2826;background:#EDE7DF}
+
+    /* Photos */
+    .photo-strip{display:flex;gap:10px;margin-bottom:18px}
+    .photo-box{position:relative;width:110px;height:110px;border-radius:12px;overflow:hidden;flex-shrink:0}
+    .photo-box img{width:100%;height:100%;object-fit:cover;display:block}
+    .photo-del{
+      position:absolute;top:5px;right:5px;
+      width:26px;height:26px;border-radius:50%;
+      background:rgba(0,0,0,.42);border:none;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;color:#fff;
+    }
+
+    /* Textarea */
+    textarea{
+      width:100%;min-height:200px;
+      border:none;outline:none;background:transparent;
+      font-family:'Noto Sans KR',sans-serif;font-size:15px;
+      line-height:1.85;color:#2A2826;resize:none;padding:0;
+    }
+    textarea::placeholder{color:#C8BBAF}
+
+    /* Action bar */
+    .divider{height:1px;background:#E8DDD0;margin:14px 0 12px}
+    .bar{display:flex;align-items:center;gap:4px}
+    .save-txt{margin-left:auto;font-size:12px;color:#B0A49A;min-width:60px;text-align:right;transition:color .3s}
+    .save-ok{color:#7B9E87!important}
+
+    /* Overlays */
+    .overlay{
+      position:fixed;inset:0;
+      background:rgba(44,40,36,.38);
+      display:flex;align-items:center;justify-content:center;
+      z-index:100;padding:20px;
+    }
+    .modal{
+      background:#FAF8F3;border-radius:20px;
+      padding:22px;width:100%;max-width:320px;
+      box-shadow:0 12px 40px rgba(44,40,36,.2);
+    }
+    .past-modal{
+      background:#FAF8F3;border-radius:20px;
+      padding:24px;width:100%;max-width:440px;
+      box-shadow:0 12px 40px rgba(44,40,36,.2);
+      max-height:85dvh;overflow-y:auto;
+    }
+
+    /* Calendar */
+    .cal-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    .cal-title{font-family:'Noto Serif KR',serif;font-size:15px;color:#2A2826;font-weight:600}
+    .wd-row{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px}
+    .wd{text-align:center;font-size:11px;color:#B0A49A;padding:2px 0}
+    .day-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+    .day{display:flex;flex-direction:column;align-items:center;justify-content:center;height:40px;border-radius:8px;cursor:pointer}
+    .day:active:not(.future){background:#EDE7DF}
+    .day.future{opacity:.25;cursor:default;pointer-events:none}
+    .day.today .dn{color:#7B9E87;font-weight:600}
+    .day.today{background:rgba(123,158,135,.1)}
+    .dn{font-size:13px;color:#2A2826;line-height:1}
+    .dot{width:4px;height:4px;border-radius:50%;margin-top:3px;background:transparent}
+    .dot.has{background:#7B9E87}
+    .legend{margin-top:14px;display:flex;align-items:center;justify-content:center;gap:6px}
+    .legend-dot{width:6px;height:6px;border-radius:50%;background:#7B9E87}
+    .legend-txt{font-size:11px;color:#B0A49A}
+
+    /* Recording pulse */
+    @keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(123,158,135,.5)}70%{box-shadow:0 0 0 10px rgba(123,158,135,0)}}
+    .rec{animation:mic-pulse 1.5s ease infinite;border-radius:10px}
+
+    .loading{min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#F2EEE7;font-size:14px;color:#B0A49A}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+/* ── Service Worker ── */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+
+const {useState, useEffect, useRef, useCallback} = React;
+const WD = ['일','월','화','수','목','금','토'];
+const MO = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+
+/* ── IndexedDB ── */
+const DB = (() => {
+  let _db = null;
+  const open = () => new Promise((res, rej) => {
+    if (_db) return res(_db);
+    const r = indexedDB.open('diary_app', 1);
+    r.onupgradeneeded = e => e.target.result.createObjectStore('entries', {keyPath: 'id'});
+    r.onsuccess = e => { _db = e.target.result; res(_db); };
+    r.onerror = () => rej(r.error);
+  });
+  const run = (mode, fn) => open().then(db => new Promise((res, rej) => {
+    const tx = db.transaction('entries', mode);
+    const req = fn(tx.objectStore('entries'));
+    if (req) { req.onsuccess = () => res(req.result ?? null); req.onerror = () => rej(req.error); }
+    else { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }
+  }));
+  return {
+    get:  id    => run('readonly',  s => s.get(id)),
+    put:  entry => run('readwrite', s => { s.put(entry); }),
+    del:  id    => run('readwrite', s => { s.delete(id); }),
+    keys: ()    => run('readonly',  s => s.getAllKeys()),
+  };
+})();
+
+/* ── Utils ── */
+function toKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function korDate(k) {
+  const [y,m,d] = k.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  return `${y}년 ${m}월 ${d}일 ${WD[dt.getDay()]}요일`;
+}
+
+/* ── Icons ── */
+const E = React.createElement;
+const svg = (w, h, children) => E('svg', {width:w, height:h, viewBox:`0 0 24 24`, fill:'none', stroke:'currentColor', strokeWidth:1.7, strokeLinecap:'round', strokeLinejoin:'round'}, ...children);
+const CalIcon  = () => svg(20,20,[E('rect',{key:'r',x:3,y:4,width:18,height:18,rx:2}),E('line',{key:'l1',x1:16,y1:2,x2:16,y2:6}),E('line',{key:'l2',x1:8,y1:2,x2:8,y2:6}),E('line',{key:'l3',x1:3,y1:10,x2:21,y2:10})]);
+const MicIcon  = ({on}) => svg(20,20,[E('rect',{key:'r',x:9,y:2,width:6,height:11,rx:3,stroke:on?'#7B9E87':'currentColor'}),E('path',{key:'p',d:'M5 10a7 7 0 0 0 14 0',stroke:on?'#7B9E87':'currentColor'}),E('line',{key:'l1',x1:12,y1:19,x2:12,y2:23,stroke:on?'#7B9E87':'currentColor'}),E('line',{key:'l2',x1:8,y1:23,x2:16,y2:23,stroke:on?'#7B9E87':'currentColor'})]);
+const ImgIcon  = () => svg(20,20,[E('rect',{key:'r',x:3,y:3,width:18,height:18,rx:2}),E('circle',{key:'c',cx:8.5,cy:8.5,r:1.5}),E('polyline',{key:'p',points:'21 15 16 10 5 21'})]);
+const XIcon    = ({s=14}) => E('svg',{width:s,height:s,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2.5,strokeLinecap:'round'},E('line',{key:'a',x1:18,y1:6,x2:6,y2:18}),E('line',{key:'b',x1:6,y1:6,x2:18,y2:18}));
+const ChL      = () => E('svg',{width:18,height:18,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,strokeLinecap:'round'},E('polyline',{points:'15 18 9 12 15 6'}));
+const ChR      = () => E('svg',{width:18,height:18,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,strokeLinecap:'round'},E('polyline',{points:'9 18 15 12 9 6'}));
+
+/* ── App ── */
+function App() {
+  const todayKey = toKey(new Date());
+
+  const [loading,    setLoading]    = useState(true);
+  const [entryKeys,  setEntryKeys]  = useState(new Set());
+  const [text,       setText]       = useState('');
+  const [photos,     setPhotos]     = useState([]);
+  const [saveState,  setSaveState]  = useState('idle');
+  const [showCal,    setShowCal]    = useState(false);
+  const [calY,       setCalY]       = useState(new Date().getFullYear());
+  const [calM,       setCalM]       = useState(new Date().getMonth());
+  const [pastEntry,  setPastEntry]  = useState(null);
+  const [recording,  setRecording]  = useState(false);
+
+  const fileRef      = useRef(null);
+  const recRef       = useRef(null);
+  const finalRef     = useRef('');
+  const saveTimer    = useRef(null);
+  const firstLoad    = useRef(false);
+  const textRef      = useRef(text);
+  textRef.current    = text;
+
+  /* Load */
+  useEffect(() => {
+    (async () => {
+      try {
+        const today = await DB.get(todayKey);
+        if (today) { setText(today.text || ''); setPhotos(today.photos || []); }
+        const keys = await DB.keys();
+        setEntryKeys(new Set(keys));
+      } catch(e) {}
+      setLoading(false);
+    })();
+  }, []);
+
+  /* Save */
+  const save = useCallback((t, p) => {
+    clearTimeout(saveTimer.current);
+    setSaveState('saving');
+    saveTimer.current = setTimeout(async () => {
+      try {
+        if (!t.trim() && !p.length) {
+          await DB.del(todayKey);
+          setEntryKeys(prev => { const s = new Set(prev); s.delete(todayKey); return s; });
+        } else {
+          await DB.put({ id: todayKey, text: t, photos: p });
+          setEntryKeys(prev => new Set([...prev, todayKey]));
+        }
+        setSaveState('saved');
+        setTimeout(() => setSaveState('idle'), 2200);
+      } catch(e) { setSaveState('idle'); }
+    }, 900);
+  }, [todayKey]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!firstLoad.current) { firstLoad.current = true; return; }
+    save(text, photos);
+  }, [text, photos, loading]);
+
+  /* Photos */
+  const cropSquare = f => new Promise(res => {
+    const fr = new FileReader();
+    fr.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        const ss = Math.min(img.width, img.height);
+        const sz = Math.min(ss, 480);
+        c.width = c.height = sz;
+        c.getContext('2d').drawImage(img, (img.width-ss)/2, (img.height-ss)/2, ss, ss, 0, 0, sz, sz);
+        res(c.toDataURL('image/jpeg', .72));
+      };
+      img.src = ev.target.result;
+    };
+    fr.readAsDataURL(f);
+  });
+
+  const handlePhotos = async e => {
+    const files = [...e.target.files], slots = 2 - photos.length;
+    if (!slots) return;
+    const processed = await Promise.all(files.slice(0, slots).map(cropSquare));
+    setPhotos(p => [...p, ...processed].slice(0, 2));
+    e.target.value = '';
+  };
+
+  /* Voice */
+  const toggleRec = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert('이 브라우저에서는 음성 인식이 지원되지 않습니다.'); return; }
+    if (recording) { recRef.current?.stop(); return; }
+    const r = new SR();
+    r.lang = 'ko-KR'; r.continuous = true; r.interimResults = true;
+    finalRef.current = textRef.current;
+    r.onresult = ev => {
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) finalRef.current += ev.results[i][0].transcript;
+        else interim += ev.results[i][0].transcript;
+      }
+      setText(finalRef.current + interim);
+    };
+    r.onend  = () => { setText(finalRef.current); setRecording(false); };
+    r.onerror = () => setRecording(false);
+    r.start(); recRef.current = r; setRecording(true);
+  };
+
+  /* Calendar */
+  const navM = dir => {
+    let y = calY, m = calM + dir;
+    if (m < 0)  { y--; m = 11; }
+    if (m > 11) { y++; m = 0; }
+    setCalY(y); setCalM(m);
+  };
+
+  const onDayClick = async dk => {
+    if (dk > todayKey) return;
+    setShowCal(false);
+    if (dk === todayKey || !entryKeys.has(dk)) return;
+    try { const entry = await DB.get(dk); if (entry) setPastEntry(entry); } catch(e) {}
+  };
+
+  const calCells = () => {
+    const total = new Date(calY, calM+1, 0).getDate();
+    const start = new Date(calY, calM, 1).getDay();
+    const cells = [];
+    for (let i = 0; i < start; i++) cells.push(E('div', {key:'e'+i}));
+    for (let d = 1; d <= total; d++) {
+      const dk = `${calY}-${String(calM+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const isT = dk === todayKey, has = entryKeys.has(dk), fut = dk > todayKey;
+      cells.push(
+        E('div', {key:dk, className:`day${isT?' today':''}${fut?' future':''}`, onClick:()=>onDayClick(dk)},
+          E('span', {className:'dn'}, d),
+          E('div',  {className:`dot${has?' has':''}`})
+        )
+      );
+    }
+    return cells;
+  };
+
+  /* Render */
+  if (loading) return E('div', {className:'loading'}, '불러오는 중...');
+
+  return E('div', {className:'wrap'},
+    E('div', {className:'card'},
+
+      /* Header */
+      E('div', {className:'hdr'},
+        E('div', null,
+          E('div', {className:'date-label'}, 'TODAY'),
+          E('div', {className:'date-main'}, korDate(todayKey))
+        ),
+        E('button', {className:'icon-btn', onClick:()=>setShowCal(true), 'aria-label':'달력'}, E(CalIcon))
+      ),
+
+      /* Photos */
+      photos.length > 0 && E('div', {className:'photo-strip'},
+        photos.map((src, i) => E('div', {key:i, className:'photo-box'},
+          E('img', {src, alt:''}),
+          E('button', {className:'photo-del', 'aria-label':'삭제',
+            onClick:()=>setPhotos(p=>p.filter((_,j)=>j!==i))}, E(XIcon))
+        ))
+      ),
+
+      /* Textarea */
+      E('textarea', {
+        value: text,
+        onChange: ev => !recording && setText(ev.target.value),
+        placeholder: recording ? '🎙 듣고 있어요...' : '오늘 하루를 기록해 보세요...',
+      }),
+
+      E('div', {className:'divider'}),
+
+      /* Action bar */
+      E('div', {className:'bar'},
+        E('div', {className: recording ? 'rec' : ''},
+          E('button', {
+            className:'icon-btn',
+            style:{color: recording ? '#7B9E87' : ''},
+            onClick: toggleRec,
+            'aria-label': recording ? '녹음 중지' : '음성 입력',
+          }, E(MicIcon, {on:recording}))
+        ),
+        photos.length < 2 && E('span', null,
+          E('button', {className:'icon-btn', onClick:()=>fileRef.current?.click(), 'aria-label':'사진 추가'}, E(ImgIcon)),
+          E('input', {ref:fileRef, type:'file', accept:'image/*', multiple:true, style:{display:'none'}, onChange:handlePhotos})
+        ),
+        E('span', {className:`save-txt${saveState==='saved'?' save-ok':''}`},
+          saveState === 'saving' ? '저장 중...' : saveState === 'saved' ? '✓ 저장됨' : ''
+        )
+      )
+    ),
+
+    /* Calendar overlay */
+    showCal && E('div', {className:'overlay', onClick:()=>setShowCal(false)},
+      E('div', {className:'modal', onClick:ev=>ev.stopPropagation()},
+        E('div', {className:'cal-hdr'},
+          E('button', {className:'icon-btn', onClick:()=>navM(-1)}, E(ChL)),
+          E('span',  {className:'cal-title'}, `${calY}년 ${MO[calM]}`),
+          E('button', {className:'icon-btn', onClick:()=>navM(1)}, E(ChR))
+        ),
+        E('div', {className:'wd-row'}, WD.map(w => E('div', {key:w, className:'wd'}, w))),
+        E('div', {className:'day-grid'}, calCells()),
+        E('div', {className:'legend'},
+          E('div', {className:'legend-dot'}),
+          E('span', {className:'legend-txt'}, '일기 쓴 날')
+        )
+      )
+    ),
+
+    /* Past entry overlay */
+    pastEntry && E('div', {className:'overlay', onClick:()=>setPastEntry(null)},
+      E('div', {className:'past-modal', onClick:ev=>ev.stopPropagation()},
+        E('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'18px'}},
+          E('div', null,
+            E('div', {className:'date-label'}, 'DIARY'),
+            E('div', {className:'date-main'}, korDate(pastEntry.id))
+          ),
+          E('button', {className:'icon-btn', onClick:()=>setPastEntry(null)}, E(XIcon, {s:16}))
+        ),
+        pastEntry.photos && pastEntry.photos.length > 0 && E('div', {className:'photo-strip'},
+          pastEntry.photos.map((src, i) => E('div', {key:i, className:'photo-box'}, E('img', {src, alt:''})))
+        ),
+        pastEntry.text
+          ? E('div', {style:{fontSize:'15px',lineHeight:'1.85',color:'#2A2826',whiteSpace:'pre-wrap'}}, pastEntry.text)
+          : E('div', {style:{fontSize:'14px',color:'#B0A49A',fontStyle:'italic'}}, '내용이 없습니다.')
+      )
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(E(App));
+</script>
+</body>
+</html>
