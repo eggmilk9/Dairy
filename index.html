@@ -53,15 +53,27 @@
     .icon-btn:active{color:#2A2826;background:#EDE7DF}
 
     /* Photos */
-    .photo-strip{display:flex;gap:10px;margin-bottom:18px}
-    .photo-box{position:relative;width:110px;height:110px;border-radius:12px;overflow:hidden;flex-shrink:0}
-    .photo-box img{width:100%;height:100%;object-fit:cover;display:block}
-    .photo-del{
-      position:absolute;top:5px;right:5px;
-      width:26px;height:26px;border-radius:50%;
-      background:rgba(0,0,0,.42);border:none;cursor:pointer;
-      display:flex;align-items:center;justify-content:center;color:#fff;
+    .photo-strip{display:flex;gap:10px;margin-bottom:18px;width:100%}
+    .photo-strip.single .photo-box{width:100%}
+    .photo-strip.double .photo-box{width:calc(50% - 5px)}
+    .photo-box{
+      position:relative;aspect-ratio:1/1;
+      border-radius:14px;overflow:hidden;flex-shrink:0;
+      -webkit-touch-callout:none;user-select:none;
     }
+    .photo-box img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+    .photo-del{
+      position:absolute;top:8px;right:8px;
+      width:32px;height:32px;border-radius:50%;
+      background:rgba(0,0,0,.55);border:none;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;color:#fff;
+      opacity:0;transform:scale(.6);
+      transition:opacity .18s,transform .18s;
+      pointer-events:none;
+    }
+    .photo-del.show{opacity:1;transform:scale(1);pointer-events:auto}
+    @keyframes del-pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+    .photo-del.show{animation:del-pop .18s ease forwards}
 
     /* Textarea */
     textarea{
@@ -194,6 +206,7 @@ function App() {
   const [calM,       setCalM]       = useState(new Date().getMonth());
   const [pastEntry,  setPastEntry]  = useState(null);
   const [recording,  setRecording]  = useState(false);
+  const [delIdx,     setDelIdx]     = useState(null);
 
   const fileRef      = useRef(null);
   const recRef       = useRef(null);
@@ -201,6 +214,7 @@ function App() {
   const saveTimer    = useRef(null);
   const firstLoad    = useRef(false);
   const textRef      = useRef(text);
+  const lpTimer      = useRef(null);
   textRef.current    = text;
 
   /* Load */
@@ -288,7 +302,19 @@ function App() {
     r.start(); recRef.current = r; setRecording(true);
   };
 
-  /* Calendar */
+  /* Long-press to reveal delete */
+  const startLP = i => {
+    lpTimer.current = setTimeout(() => {
+      setDelIdx(i);
+      if (navigator.vibrate) navigator.vibrate(40);
+    }, 550);
+  };
+  const cancelLP = () => clearTimeout(lpTimer.current);
+  const dismissDel = ev => {
+    if (!ev.target.closest?.('.photo-box')) setDelIdx(null);
+  };
+
+  /* Calendar nav */
   const navM = dir => {
     let y = calY, m = calM + dir;
     if (m < 0)  { y--; m = 11; }
@@ -325,7 +351,7 @@ function App() {
   if (loading) return E('div', {className:'loading'}, '불러오는 중...');
 
   return E('div', {className:'wrap'},
-    E('div', {className:'card'},
+    E('div', {className:'card', onClickCapture: dismissDel},
 
       /* Header */
       E('div', {className:'hdr'},
@@ -337,11 +363,29 @@ function App() {
       ),
 
       /* Photos */
-      photos.length > 0 && E('div', {className:'photo-strip'},
-        photos.map((src, i) => E('div', {key:i, className:'photo-box'},
-          E('img', {src, alt:''}),
-          E('button', {className:'photo-del', 'aria-label':'삭제',
-            onClick:()=>setPhotos(p=>p.filter((_,j)=>j!==i))}, E(XIcon))
+      photos.length > 0 && E('div', {className:`photo-strip${photos.length===1?' single':' double'}`},
+        photos.map((src, i) => E('div', {
+          key: i,
+          className: 'photo-box',
+          onTouchStart:  () => startLP(i),
+          onTouchEnd:    cancelLP,
+          onTouchMove:   cancelLP,
+          onMouseDown:   () => startLP(i),
+          onMouseUp:     cancelLP,
+          onMouseLeave:  cancelLP,
+          onContextMenu: ev => { ev.preventDefault(); startLP(i); },
+          onClick:       () => { if (delIdx === i) setDelIdx(null); },
+        },
+          E('img', {src, alt:'', draggable:false}),
+          E('button', {
+            className: `photo-del${delIdx===i?' show':''}`,
+            'aria-label': '사진 삭제',
+            onClick: ev => {
+              ev.stopPropagation();
+              setPhotos(p => p.filter((_,j) => j!==i));
+              setDelIdx(null);
+            },
+          }, E(XIcon, {s:15}))
         ))
       ),
 
