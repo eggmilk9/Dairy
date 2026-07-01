@@ -120,6 +120,8 @@
     .day.future{opacity:.25;cursor:default;pointer-events:none}
     .day.today .dn{color:#7B9E87;font-weight:600}
     .day.today{background:rgba(123,158,135,.1)}
+    .day.active .dn{color:#C8A87A;font-weight:600}
+    .day.active{background:rgba(200,168,122,.1)}
     .dn{font-size:13px;color:#2A2826;line-height:1}
     .dot{width:4px;height:4px;border-radius:50%;margin-top:3px;background:transparent}
     .dot.has{background:#7B9E87}
@@ -132,6 +134,7 @@
     .rec{animation:mic-pulse 1.5s ease infinite;border-radius:10px}
 
     .loading{min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#F2EEE7;font-size:14px;color:#B0A49A}
+    .back-today{background:rgba(123,158,135,.12);border:none;cursor:pointer;color:#7B9E87;font-family:'Noto Sans KR',sans-serif;font-size:12px;font-weight:500;padding:6px 11px;border-radius:20px;white-space:nowrap;margin-right:4px}
   </style>
 </head>
 <body>
@@ -198,13 +201,13 @@ function App() {
 
   const [loading,    setLoading]    = useState(true);
   const [entryKeys,  setEntryKeys]  = useState(new Set());
+  const [activeKey,  setActiveKey]  = useState(todayKey);
   const [text,       setText]       = useState('');
   const [photos,     setPhotos]     = useState([]);
   const [saveState,  setSaveState]  = useState('idle');
   const [showCal,    setShowCal]    = useState(false);
   const [calY,       setCalY]       = useState(new Date().getFullYear());
   const [calM,       setCalM]       = useState(new Date().getMonth());
-  const [pastEntry,  setPastEntry]  = useState(null);
   const [recording,  setRecording]  = useState(false);
   const [delIdx,     setDelIdx]     = useState(null);
 
@@ -212,10 +215,15 @@ function App() {
   const recRef       = useRef(null);
   const finalRef     = useRef('');
   const saveTimer    = useRef(null);
-  const firstLoad    = useRef(false);
+  const skipSave     = useRef(false);
   const textRef      = useRef(text);
+  const photosRef    = useRef(photos);
   const lpTimer      = useRef(null);
+  const activeKeyRef = useRef(activeKey);
+  const prevKeyRef   = useRef(activeKey);
   textRef.current    = text;
+  photosRef.current  = photos;
+  activeKeyRef.current = activeKey;
 
   /* Load */
   useEffect(() => {
@@ -230,30 +238,55 @@ function App() {
     })();
   }, []);
 
-  /* Save */
-  const save = useCallback((t, p) => {
+  /* Save (accepts explicit key) */
+  const save = useCallback((t, p, key) => {
     clearTimeout(saveTimer.current);
     setSaveState('saving');
     saveTimer.current = setTimeout(async () => {
       try {
         if (!t.trim() && !p.length) {
-          await DB.del(todayKey);
-          setEntryKeys(prev => { const s = new Set(prev); s.delete(todayKey); return s; });
+          await DB.del(key);
+          setEntryKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
         } else {
-          await DB.put({ id: todayKey, text: t, photos: p });
-          setEntryKeys(prev => new Set([...prev, todayKey]));
+          await DB.put({ id: key, text: t, photos: p });
+          setEntryKeys(prev => new Set([...prev, key]));
         }
         setSaveState('saved');
         setTimeout(() => setSaveState('idle'), 2200);
       } catch(e) { setSaveState('idle'); }
     }, 900);
-  }, [todayKey]);
+  }, []);
 
+  /* Auto-save when text/photos change */
   useEffect(() => {
     if (loading) return;
-    if (!firstLoad.current) { firstLoad.current = true; return; }
-    save(text, photos);
+    if (skipSave.current) { skipSave.current = false; return; }
+    save(text, photos, activeKeyRef.current);
   }, [text, photos, loading]);
+
+  /* Switch active date — save previous, load next */
+  useEffect(() => {
+    if (loading) return;
+    const prev = prevKeyRef.current;
+    prevKeyRef.current = activeKey;
+    if (prev === activeKey) return;
+
+    // Flush-save the entry we're leaving
+    clearTimeout(saveTimer.current);
+    const t = textRef.current, p = photosRef.current;
+    if (!t.trim() && !p.length) {
+      DB.del(prev).then(() => setEntryKeys(s => { const n = new Set(s); n.delete(prev); return n; })).catch(()=>{});
+    } else {
+      DB.put({ id: prev, text: t, photos: p }).then(() => setEntryKeys(s => new Set([...s, prev]))).catch(()=>{});
+    }
+
+    // Load the new date
+    skipSave.current = true;
+    DB.get(activeKey).then(entry => {
+      setText(entry?.text || '');
+      setPhotos(entry?.photos || []);
+    }).catch(() => { setText(''); setPhotos([]); });
+  }, [activeKey]);
 
   /* Photos */
   const cropSquare = f => new Promise(res => {
@@ -322,11 +355,10 @@ function App() {
     setCalY(y); setCalM(m);
   };
 
-  const onDayClick = async dk => {
+  const onDayClick = dk => {
     if (dk > todayKey) return;
+    setActiveKey(dk);
     setShowCal(false);
-    if (dk === todayKey || !entryKeys.has(dk)) return;
-    try { const entry = await DB.get(dk); if (entry) setPastEntry(entry); } catch(e) {}
   };
 
   const calCells = () => {
@@ -337,8 +369,9 @@ function App() {
     for (let d = 1; d <= total; d++) {
       const dk = `${calY}-${String(calM+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const isT = dk === todayKey, has = entryKeys.has(dk), fut = dk > todayKey;
+      const isActive = dk === activeKey && dk !== todayKey;
       cells.push(
-        E('div', {key:dk, className:`day${isT?' today':''}${fut?' future':''}`, onClick:()=>onDayClick(dk)},
+        E('div', {key:dk, className:`day${isT?' today':''}${isActive?' active':''}${fut?' future':''}`, onClick:()=>onDayClick(dk)},
           E('span', {className:'dn'}, d),
           E('div',  {className:`dot${has?' has':''}`})
         )
@@ -355,10 +388,14 @@ function App() {
 
       /* Header */
       E('div', {className:'hdr'},
-        E('div', null,
-          E('div', {className:'date-label'}, 'TODAY'),
-          E('div', {className:'date-main'}, korDate(todayKey))
+        E('div', {style:{flex:1,minWidth:0}},
+          E('div', {className:'date-label'}, activeKey === todayKey ? 'TODAY' : '지난 일기'),
+          E('div', {className:'date-main'}, korDate(activeKey))
         ),
+        activeKey !== todayKey && E('button', {
+          className: 'back-today',
+          onClick: () => setActiveKey(todayKey),
+        }, '← 오늘'),
         E('button', {className:'icon-btn', onClick:()=>setShowCal(true), 'aria-label':'달력'}, E(CalIcon))
       ),
 
@@ -393,7 +430,7 @@ function App() {
       E('textarea', {
         value: text,
         onChange: ev => !recording && setText(ev.target.value),
-        placeholder: recording ? '🎙 듣고 있어요...' : '오늘 하루를 기록해 보세요...',
+        placeholder: recording ? '🎙 듣고 있어요...' : activeKey === todayKey ? '오늘 하루를 기록해 보세요...' : '이날의 기억을 적어보세요...',
       }),
 
       E('div', {className:'divider'}),
@@ -435,24 +472,6 @@ function App() {
       )
     ),
 
-    /* Past entry overlay */
-    pastEntry && E('div', {className:'overlay', onClick:()=>setPastEntry(null)},
-      E('div', {className:'past-modal', onClick:ev=>ev.stopPropagation()},
-        E('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'18px'}},
-          E('div', null,
-            E('div', {className:'date-label'}, 'DIARY'),
-            E('div', {className:'date-main'}, korDate(pastEntry.id))
-          ),
-          E('button', {className:'icon-btn', onClick:()=>setPastEntry(null)}, E(XIcon, {s:16}))
-        ),
-        pastEntry.photos && pastEntry.photos.length > 0 && E('div', {className:'photo-strip'},
-          pastEntry.photos.map((src, i) => E('div', {key:i, className:'photo-box'}, E('img', {src, alt:''})))
-        ),
-        pastEntry.text
-          ? E('div', {style:{fontSize:'15px',lineHeight:'1.85',color:'#2A2826',whiteSpace:'pre-wrap'}}, pastEntry.text)
-          : E('div', {style:{fontSize:'14px',color:'#B0A49A',fontStyle:'italic'}}, '내용이 없습니다.')
-      )
-    )
   );
 }
 
