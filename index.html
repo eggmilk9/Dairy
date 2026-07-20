@@ -132,16 +132,23 @@ function b64ToArr(b64) {
   return arr;
 }
 
-/* ── docx loader ── */
-let docxLib = null;
-const loadDocx = () => new Promise((res, rej) => {
-  if (docxLib) return res(docxLib);
-  const s = document.createElement('script');
-  s.src = 'https://unpkg.com/docx@8.5.0/build/index.js';
-  s.onload  = () => { docxLib = window.docx; res(docxLib); };
-  s.onerror = () => rej(new Error('docx 라이브러리 로드 실패'));
-  document.head.appendChild(s);
-});
+/* ── RTF helpers ── */
+function toRtfStr(str) {
+  return [...(str||'')].map(ch => {
+    const c = ch.charCodeAt(0);
+    if (c === 92) return '\\\\';
+    if (c === 123) return '\\{';
+    if (c === 125) return '\\}';
+    if (c < 128) return ch;
+    const signed = c > 32767 ? c - 65536 : c;
+    return `\\u${signed}?`;
+  }).join('');
+}
+function b64ToHex(b64) {
+  const arr = b64ToArr(b64), parts = [];
+  for (let i = 0; i < arr.length; i++) parts.push(arr[i].toString(16).padStart(2,'0'));
+  return parts.join('');
+}
 
 /* ── Icons ── */
 const E = React.createElement;
@@ -300,100 +307,78 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(''), 2800);
   };
 
-  /* ── Export to .docx ── */
+  /* ── Export to .rtf (no external libs, Pages compatible) ── */
   const exportDiary = async () => {
     setExporting(true);
     showToast('📄 내보내기 준비 중...');
     try {
-      const { Document, Paragraph, TextRun, ImageRun, HeadingLevel, Packer, AlignmentType, BorderStyle } = await loadDocx();
-
-      // flush current entry first
+      // Flush current entry first
       const curT = textRef.current, curP = photosRef.current, curK = activeKeyRef.current;
       if (curT.trim() || curP.length) await DB.put({ id: curK, text: curT, photos: curP });
 
       const allEntries = await DB.getAll();
       allEntries.sort((a, b) => a.id.localeCompare(b.id));
-
       if (!allEntries.length) { showToast('저장된 일기가 없어요'); setExporting(false); return; }
 
-      const children = [];
+      const r = [];
+      r.push('{\\rtf1\\ansi\\ansicpg949\\deff0');
+      r.push('{\\fonttbl{\\f0\\fnil\\fcharset129 Apple SD Gothic Neo;}}');
+      r.push('{\\colortbl;\\red42\\green40\\blue38;\\red123\\green158\\blue135;\\red176\\green164\\blue154;}');
+      r.push('\\paperw11906\\paperh16838\\margl1800\\margr1800\\margt1800\\margb1800\\widowctrl');
+      r.push('');
 
       // Title
-      children.push(new Paragraph({
-        children: [new TextRun({ text: '나의 일기', bold: true, size: 52, color: '2A2826', font: 'Apple SD Gothic Neo' })],
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 600 },
-      }));
+      r.push(`\\pard\\qc\\f0\\fs52\\b\\cf2 ${toRtfStr('나의 일기')}\\par`);
+      r.push('\\pard\\par\\pard\\par');
 
-      for (let idx = 0; idx < allEntries.length; idx++) {
-        const entry = allEntries[idx];
+      for (let i = 0; i < allEntries.length; i++) {
+        const entry = allEntries[i];
+        if (i > 0) { r.push('\\pard\\par\\pard\\par'); }
 
         // Date heading
-        children.push(new Paragraph({
-          children: [new TextRun({ text: korDate(entry.id), bold: true, size: 28, color: '7B9E87', font: 'Apple SD Gothic Neo' })],
-          spacing: { before: idx === 0 ? 0 : 560, after: 200 },
-        }));
+        r.push(`\\pard\\f0\\fs28\\b\\cf2 ${toRtfStr(korDate(entry.id))}\\par`);
+        r.push('\\pard\\brdrb\\brdrs\\brdrw8\\brdrcf3\\brdrsp60\\fs4  \\par');
+        r.push('\\pard\\par');
 
-        // Separator line under date
-        children.push(new Paragraph({
-          children: [new TextRun({ text: '', size: 4 })],
-          border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E8DDD0', space: 1 } },
-          spacing: { after: 220 },
-        }));
-
-        // Photos
-        if (entry.photos && entry.photos.length > 0) {
-          const imgRuns = [];
+        // Photos (each on its own line, side by side via inline)
+        if (entry.photos?.length) {
+          const imgParts = [];
           for (const dataUrl of entry.photos) {
-            const b64 = dataUrl.split(',')[1];
-            imgRuns.push(
-              new ImageRun({ type: 'jpg', data: b64ToArr(b64), transformation: { width: 220, height: 220 } }),
-              new TextRun({ text: '  ' })
-            );
+            const hex = b64ToHex(dataUrl.split(',')[1]);
+            imgParts.push(`{\\pict\\jpegblip\\picscalex100\\picscaley100\\picwgoal3000\\pichgoal3000 ${hex}}`);
           }
-          children.push(new Paragraph({ children: imgRuns, spacing: { after: 200 } }));
+          r.push(`\\pard ${imgParts.join('  ')}\\par`);
+          r.push('\\pard\\par');
         }
 
-        // Text lines
-        if (entry.text && entry.text.trim()) {
-          const lines = entry.text.split('\n');
-          for (const line of lines) {
-            children.push(new Paragraph({
-              children: [new TextRun({ text: line || ' ', size: 24, color: '2A2826', font: 'Apple SD Gothic Neo' })],
-              spacing: { after: 80 },
-            }));
+        // Text
+        if (entry.text?.trim()) {
+          for (const line of entry.text.split('\n')) {
+            r.push(`\\pard\\f0\\fs24\\b0\\cf1 ${toRtfStr(line||' ')}\\par`);
           }
         } else {
-          children.push(new Paragraph({
-            children: [new TextRun({ text: '(내용 없음)', size: 22, color: 'B0A49A', italics: true })],
-            spacing: { after: 80 },
-          }));
+          r.push(`\\pard\\f0\\fs22\\b0\\i\\cf3 ${toRtfStr('(내용 없음)')}\\par`);
         }
       }
+      r.push('}');
 
-      const doc = new Document({
-        styles: {
-          default: {
-            document: {
-              run: { font: 'Apple SD Gothic Neo', size: 24, color: '2A2826' },
-            }
-          }
-        },
-        sections: [{
-          properties: { page: { margin: { top: 1200, right: 1200, bottom: 1200, left: 1200 } } },
-          children,
-        }],
-      });
+      const blob = new Blob([r.join('\n')], {type: 'application/rtf'});
+      const filename = `일기_${toKey(new Date()).replace(/-/g,'')}.rtf`;
 
-      const blob = await Packer.toBlob(doc);
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      const filename = `일기_${toKey(new Date()).replace(/-/g,'')}.docx`;
-      a.href = url; a.download = filename; a.click();
-      URL.revokeObjectURL(url);
+      // iOS: use Web Share API → native share sheet (Pages 선택 가능)
+      const file = new File([blob], filename, {type: 'application/rtf'});
+      if (navigator.share && navigator.canShare?.({files:[file]})) {
+        await navigator.share({files:[file], title:'나의 일기'});
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      }
       showToast(`✓ ${allEntries.length}개 항목 내보내기 완료`);
     } catch(e) {
-      showToast('내보내기 실패: ' + e.message);
+      if (e.name !== 'AbortError') showToast('내보내기 실패: ' + e.message);
+      else showToast('');
     }
     setExporting(false);
   };
