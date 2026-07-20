@@ -72,6 +72,19 @@
     .legend-dot{width:6px;height:6px;border-radius:50%;background:#7B9E87}
     .legend-txt{font-size:11px;color:#B0A49A}
 
+    /* Select mode */
+    .day.no-sel{opacity:.18;pointer-events:none}
+    .day.sel-on{background:#7B9E87!important}
+    .day.sel-on .dn{color:#fff!important;font-weight:600}
+    .day.sel-on .dot{background:rgba(255,255,255,.55)!important}
+    .sel-bar{display:flex;align-items:center;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid #E8DDD0}
+    .sel-all{background:none;border:1px solid #C8BBAF;color:#9B9089;font-size:12px;font-family:'Noto Sans KR',sans-serif;padding:7px 12px;border-radius:16px;cursor:pointer;white-space:nowrap}
+    .sel-count{font-size:12px;color:#9B9089;flex:1;text-align:center}
+    .sel-dl{background:#7B9E87;border:none;color:#fff;font-size:13px;font-weight:500;font-family:'Noto Sans KR',sans-serif;padding:8px 16px;border-radius:16px;cursor:pointer;white-space:nowrap}
+    .sel-dl:disabled{opacity:.35;cursor:default}
+    .sel-cancel{background:none;border:none;cursor:pointer;font-size:13px;color:#B0A49A;font-family:'Noto Sans KR',sans-serif;padding:4px 0;min-width:36px}
+    .sel-title{font-family:'Noto Serif KR',serif;font-size:15px;color:#2A2826;font-weight:600;text-align:center;flex:1}
+
     /* Export toast */
     .toast{position:fixed;bottom:calc(28px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:#2A2826;color:#FAF8F3;font-size:13px;padding:10px 18px;border-radius:20px;white-space:nowrap;z-index:200;pointer-events:none;opacity:0;transition:opacity .25s}
     .toast.show{opacity:1}
@@ -178,6 +191,8 @@ function App() {
   const [delIdx,     setDelIdx]     = useState(null);
   const [exporting,  setExporting]  = useState(false);
   const [toast,      setToast]      = useState('');
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedDays, setSelectedDays] = useState(new Set());
 
   const fileRef      = useRef(null);
   const recRef       = useRef(null);
@@ -308,17 +323,17 @@ function App() {
   };
 
   /* ── Export to .rtf (no external libs, Pages compatible) ── */
-  const exportDiary = async () => {
+  const doExport = async (keySet) => {
     setExporting(true);
     showToast('📄 내보내기 준비 중...');
     try {
-      // Flush current entry first
       const curT = textRef.current, curP = photosRef.current, curK = activeKeyRef.current;
       if (curT.trim() || curP.length) await DB.put({ id: curK, text: curT, photos: curP });
 
       const allEntries = await DB.getAll();
-      allEntries.sort((a, b) => a.id.localeCompare(b.id));
-      if (!allEntries.length) { showToast('저장된 일기가 없어요'); setExporting(false); return; }
+      const entries = keySet ? allEntries.filter(e => keySet.has(e.id)) : allEntries;
+      entries.sort((a, b) => a.id.localeCompare(b.id));
+      if (!entries.length) { showToast('선택된 일기가 없어요'); setExporting(false); return; }
 
       const r = [];
       r.push('{\\rtf1\\ansi\\ansicpg949\\deff0');
@@ -326,21 +341,15 @@ function App() {
       r.push('{\\colortbl;\\red42\\green40\\blue38;\\red123\\green158\\blue135;\\red176\\green164\\blue154;}');
       r.push('\\paperw11906\\paperh16838\\margl1800\\margr1800\\margt1800\\margb1800\\widowctrl');
       r.push('');
-
-      // Title
       r.push(`\\pard\\qc\\f0\\fs52\\b\\cf2 ${toRtfStr('나의 일기')}\\par`);
       r.push('\\pard\\par\\pard\\par');
 
-      for (let i = 0; i < allEntries.length; i++) {
-        const entry = allEntries[i];
-        if (i > 0) { r.push('\\pard\\par\\pard\\par'); }
-
-        // Date heading
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        if (i > 0) r.push('\\pard\\par\\pard\\par');
         r.push(`\\pard\\f0\\fs28\\b\\cf2 ${toRtfStr(korDate(entry.id))}\\par`);
         r.push('\\pard\\brdrb\\brdrs\\brdrw8\\brdrcf3\\brdrsp60\\fs4  \\par');
         r.push('\\pard\\par');
-
-        // Photos (each on its own line, side by side via inline)
         if (entry.photos?.length) {
           const imgParts = [];
           for (const dataUrl of entry.photos) {
@@ -350,23 +359,18 @@ function App() {
           r.push(`\\pard ${imgParts.join('  ')}\\par`);
           r.push('\\pard\\par');
         }
-
-        // Text
         if (entry.text?.trim()) {
-          for (const line of entry.text.split('\n')) {
+          for (const line of entry.text.split('\n'))
             r.push(`\\pard\\f0\\fs24\\b0\\cf1 ${toRtfStr(line||' ')}\\par`);
-          }
         } else {
           r.push(`\\pard\\f0\\fs22\\b0\\i\\cf3 ${toRtfStr('(내용 없음)')}\\par`);
         }
       }
       r.push('}');
 
-      const blob = new Blob([r.join('\n')], {type: 'application/rtf'});
+      const blob = new Blob([r.join('\n')], {type:'application/rtf'});
       const filename = `일기_${toKey(new Date()).replace(/-/g,'')}.rtf`;
-
-      // iOS: use Web Share API → native share sheet (Pages 선택 가능)
-      const file = new File([blob], filename, {type: 'application/rtf'});
+      const file = new File([blob], filename, {type:'application/rtf'});
       if (navigator.share && navigator.canShare?.({files:[file]})) {
         await navigator.share({files:[file], title:'나의 일기'});
       } else {
@@ -375,7 +379,7 @@ function App() {
         a.href = url; a.download = filename; a.click();
         URL.revokeObjectURL(url);
       }
-      showToast(`✓ ${allEntries.length}개 항목 내보내기 완료`);
+      showToast(`✓ ${entries.length}개 내보내기 완료`);
     } catch(e) {
       if (e.name !== 'AbortError') showToast('내보내기 실패: ' + e.message);
       else showToast('');
@@ -385,14 +389,38 @@ function App() {
 
   /* Calendar */
   const navM = dir => { let y=calY, m=calM+dir; if(m<0){y--;m=11;} if(m>11){y++;m=0;} setCalY(y); setCalM(m); };
-  const onDayClick = dk => { if (dk > todayKey) return; setActiveKey(dk); setShowCal(false); };
+  const closeCal = () => { setShowCal(false); setSelectMode(false); setSelectedDays(new Set()); };
+  const enterSelect = () => { setSelectMode(true); setSelectedDays(new Set()); };
+  const onDayClick = dk => {
+    if (dk > todayKey) return;
+    if (selectMode) {
+      if (!entryKeys.has(dk)) return;
+      setSelectedDays(prev => { const n = new Set(prev); n.has(dk) ? n.delete(dk) : n.add(dk); return n; });
+    } else {
+      setActiveKey(dk); closeCal();
+    }
+  };
+  const allSelectable = [...entryKeys];
+  const allSelected = allSelectable.length > 0 && allSelectable.every(k => selectedDays.has(k));
+  const toggleAll = () => setSelectedDays(allSelected ? new Set() : new Set(allSelectable));
+
   const calCells = () => {
     const total = new Date(calY, calM+1, 0).getDate(), start = new Date(calY, calM, 1).getDay(), cells = [];
     for (let i = 0; i < start; i++) cells.push(E('div', {key:'e'+i}));
     for (let d = 1; d <= total; d++) {
       const dk = `${calY}-${String(calM+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const isT = dk === todayKey, isActive = dk === activeKey && dk !== todayKey, has = entryKeys.has(dk), fut = dk > todayKey;
-      cells.push(E('div', {key:dk, className:`day${isT?' today':''}${isActive?' active':''}${fut?' future':''}`, onClick:()=>onDayClick(dk)},
+      const isT = dk===todayKey, isActive = dk===activeKey && dk!==todayKey;
+      const has = entryKeys.has(dk), fut = dk>todayKey;
+      const noSel = selectMode && !has && !fut;
+      const selOn  = selectMode && selectedDays.has(dk);
+      const cls = ['day',
+        isT&&!selectMode?'today':'',
+        isActive&&!selectMode?'active':'',
+        fut?'future':'',
+        noSel?'no-sel':'',
+        selOn?'sel-on':'',
+      ].filter(Boolean).join(' ');
+      cells.push(E('div', {key:dk, className:cls, onClick:()=>onDayClick(dk)},
         E('span', {className:'dn'}, d),
         E('div',  {className:`dot${has?' has':''}`})
       ));
@@ -412,9 +440,7 @@ function App() {
         ),
         E('div', {className:'hdr-actions'},
           activeKey !== todayKey && E('button', {className:'back-today', onClick:()=>setActiveKey(todayKey)}, '← 오늘'),
-          E('button', {className:'icon-btn', onClick:()=>setShowCal(true), 'aria-label':'달력'}, E(CalIcon)),
-          E('button', {className:'icon-btn', onClick:exportDiary, disabled:exporting, 'aria-label':'내보내기',
-            style:{color: exporting ? '#7B9E87' : ''}}, E(DlIcon))
+          E('button', {className:'icon-btn', onClick:()=>setShowCal(true), 'aria-label':'달력'}, E(CalIcon))
         )
       ),
 
@@ -453,18 +479,47 @@ function App() {
       )
     ),
 
-    showCal && E('div', {className:'overlay', onClick:()=>setShowCal(false)},
+    showCal && E('div', {className:'overlay', onClick:closeCal},
       E('div', {className:'modal', onClick:ev=>ev.stopPropagation()},
-        E('div', {className:'cal-hdr'},
+
+        /* ─ Normal header ─ */
+        !selectMode && E('div', {className:'cal-hdr'},
           E('button', {className:'icon-btn', onClick:()=>navM(-1)}, E(ChL)),
-          E('span', {className:'cal-title'}, `${calY}년 ${MO[calM]}`),
-          E('button', {className:'icon-btn', onClick:()=>navM(1)}, E(ChR))
+          E('span',   {className:'cal-title'}, `${calY}년 ${MO[calM]}`),
+          E('div',    {style:{display:'flex',alignItems:'center',gap:'2px'}},
+            E('button', {className:'icon-btn', onClick:()=>navM(1)},  E(ChR)),
+            E('button', {className:'icon-btn', onClick:enterSelect, 'aria-label':'날짜 선택해서 내보내기'}, E(DlIcon))
+          )
         ),
+
+        /* ─ Select-mode header ─ */
+        selectMode && E('div', {className:'cal-hdr'},
+          E('button', {className:'sel-cancel', onClick:()=>{setSelectMode(false);setSelectedDays(new Set());}}, '취소'),
+          E('span',   {className:'sel-title'}, selectedDays.size ? `${selectedDays.size}개 선택됨` : '날짜 선택'),
+          E('div',    {style:{minWidth:'36px'}})
+        ),
+
         E('div', {className:'wd-row'}, WD.map(w => E('div', {key:w, className:'wd'}, w))),
         E('div', {className:'day-grid'}, calCells()),
-        E('div', {className:'legend'},
-          E('div', {className:'legend-dot'}),
+
+        /* ─ Normal legend ─ */
+        !selectMode && E('div', {className:'legend'},
+          E('div',  {className:'legend-dot'}),
           E('span', {className:'legend-txt'}, '일기 쓴 날')
+        ),
+
+        /* ─ Select-mode action bar ─ */
+        selectMode && E('div', {className:'sel-bar'},
+          E('button', {className:'sel-all', onClick:toggleAll},
+            allSelected ? '전체 해제' : '전체 선택'
+          ),
+          E('span', {className:'sel-count'},
+            selectedDays.size ? `${selectedDays.size}일 선택` : '날짜를 선택하세요'
+          ),
+          E('button', {
+            className:'sel-dl', disabled:selectedDays.size===0||exporting,
+            onClick: async () => { closeCal(); await doExport(new Set(selectedDays)); }
+          }, exporting ? '준비 중...' : '내보내기')
         )
       )
     ),
