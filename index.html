@@ -85,6 +85,16 @@
     .sel-cancel{background:none;border:none;cursor:pointer;font-size:13px;color:#B0A49A;font-family:'Noto Sans KR',sans-serif;padding:4px 0;min-width:36px}
     .sel-title{font-family:'Noto Serif KR',serif;font-size:15px;color:#2A2826;font-weight:600;text-align:center;flex:1}
 
+    /* Export name modal */
+    .export-modal{background:#FAF8F3;border-radius:20px;padding:24px 22px;width:100%;max-width:320px;box-shadow:0 12px 40px rgba(44,40,36,.2)}
+    .export-modal-title{font-family:'Noto Serif KR',serif;font-size:15px;font-weight:600;color:#2A2826;margin-bottom:16px}
+    .export-input{width:100%;border:1.5px solid #E8DDD0;border-radius:10px;padding:11px 13px;font-family:'Noto Sans KR',sans-serif;font-size:14px;color:#2A2826;background:#fff;outline:none;box-sizing:border-box}
+    .export-input:focus{border-color:#7B9E87}
+    .export-ext{font-size:12px;color:#B0A49A;margin-top:6px;margin-bottom:20px}
+    .export-btns{display:flex;gap:10px}
+    .export-cancel{flex:1;background:none;border:1.5px solid #E8DDD0;border-radius:12px;padding:11px;font-family:'Noto Sans KR',sans-serif;font-size:14px;color:#9B9089;cursor:pointer}
+    .export-confirm{flex:2;background:#7B9E87;border:none;border-radius:12px;padding:11px;font-family:'Noto Sans KR',sans-serif;font-size:14px;font-weight:500;color:#fff;cursor:pointer}
+
     /* Export toast */
     .toast{position:fixed;bottom:calc(28px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:#2A2826;color:#FAF8F3;font-size:13px;padding:10px 18px;border-radius:20px;white-space:nowrap;z-index:200;pointer-events:none;opacity:0;transition:opacity .25s}
     .toast.show{opacity:1}
@@ -206,6 +216,9 @@ function App() {
   const [toast,      setToast]      = useState('');
   const [selectMode, setSelectMode] = useState(false);
   const [selectedDays, setSelectedDays] = useState(new Set());
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportName, setExportName] = useState('');
+  const [pendingKeys, setPendingKeys] = useState(null);
 
   const fileRef      = useRef(null);
   const recRef       = useRef(null);
@@ -336,7 +349,7 @@ function App() {
   };
 
   /* ── Export to .docx (Pages에서 바로 열림, 사진 포함) ── */
-  const doExport = async (keySet) => {
+  const doExport = async (keySet, customName) => {
     setExporting(true);
     showToast('📄 내보내기 준비 중...');
     try {
@@ -392,7 +405,7 @@ function App() {
       ]);
 
       const blob=new Blob([zipBytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
-      const filename=`일기_${toKey(new Date()).replace(/-/g,'')}.docx`;
+      const filename=`${(customName||'일기_'+toKey(new Date()).replace(/-/g,''))}.docx`;
       const file=new File([blob],filename,{type:blob.type});
       if(navigator.share&&navigator.canShare?.({files:[file]})){
         await navigator.share({files:[file],title:'나의 일기'});
@@ -540,13 +553,43 @@ function App() {
           ),
           E('button', {
             className:'sel-dl', disabled:selectedDays.size===0||exporting,
-            onClick: async () => { closeCal(); await doExport(new Set(selectedDays)); }
-          }, exporting ? '준비 중...' : '내보내기')
+            onClick: () => {
+              setPendingKeys(new Set(selectedDays));
+              setExportName('일기_' + toKey(new Date()).replace(/-/g,''));
+              setShowExportModal(true);
+            }
+          }, '내보내기')
         )
       )
     ),
 
-    E('div', {className:`toast${toast?' show':''}`}, toast)
+    E('div', {className:`toast${toast?' show':''}`}, toast),
+
+    showExportModal && E('div', {className:'overlay', onClick:()=>setShowExportModal(false)},
+      E('div', {className:'export-modal', onClick:ev=>ev.stopPropagation()},
+        E('div', {className:'export-modal-title'}, '파일 이름'),
+        E('input', {
+          className:'export-input',
+          value: exportName,
+          onChange: ev => setExportName(ev.target.value),
+          autoFocus: true,
+          spellCheck: false,
+        }),
+        E('div', {className:'export-ext'}, exportName ? exportName+'.docx' : '.docx'),
+        E('div', {className:'export-btns'},
+          E('button', {className:'export-cancel', onClick:()=>setShowExportModal(false)}, '취소'),
+          E('button', {
+            className:'export-confirm',
+            disabled: !exportName.trim(),
+            onClick: async () => {
+              setShowExportModal(false);
+              closeCal();
+              await doExport(pendingKeys, exportName.trim());
+            }
+          }, '내보내기')
+        )
+      )
+    )
   );
 }
 
