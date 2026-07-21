@@ -157,11 +157,21 @@ function toRtfStr(str) {
     return `\\u${signed}?`;
   }).join('');
 }
-function b64ToHex(b64) {
-  const arr = b64ToArr(b64), parts = [];
-  for (let i = 0; i < arr.length; i++) parts.push(arr[i].toString(16).padStart(2,'0'));
-  return parts.join('');
-}
+// JPEG → PNG 변환 후 hex (Pages는 pngblip이 더 안정적)
+const jpegToRtfPng = (dataUrl) => new Promise(res => {
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 480;
+    c.getContext('2d').drawImage(img, 0, 0, 480, 480);
+    const b64 = c.toDataURL('image/png').split(',')[1];
+    const arr = b64ToArr(b64);
+    let hex = '';
+    for (let i = 0; i < arr.length; i++) hex += arr[i].toString(16).padStart(2,'0');
+    res(hex);
+  };
+  img.src = dataUrl;
+});
 
 /* ── Icons ── */
 const E = React.createElement;
@@ -351,13 +361,11 @@ function App() {
         r.push('\\pard\\brdrb\\brdrs\\brdrw8\\brdrcf3\\brdrsp60\\fs4  \\par');
         r.push('\\pard\\par');
         if (entry.photos?.length) {
-          const imgParts = [];
           for (const dataUrl of entry.photos) {
-            const hex = b64ToHex(dataUrl.split(',')[1]);
-            imgParts.push(`{\\pict\\jpegblip\\picscalex100\\picscaley100\\picwgoal3000\\pichgoal3000 ${hex}}`);
+            const hex = await jpegToRtfPng(dataUrl);
+            r.push(`\\pard{\\pict\\pngblip\\picw480\\pich480\\picwgoal3000\\pichgoal3000 ${hex}}\\par`);
+            r.push('\\pard\\par');
           }
-          r.push(`\\pard ${imgParts.join('  ')}\\par`);
-          r.push('\\pard\\par');
         }
         if (entry.text?.trim()) {
           for (const line of entry.text.split('\n'))
