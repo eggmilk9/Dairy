@@ -145,33 +145,36 @@ function b64ToArr(b64) {
   return arr;
 }
 
-/* ── RTF helpers ── */
-function toRtfStr(str) {
-  return [...(str||'')].map(ch => {
-    const c = ch.charCodeAt(0);
-    if (c === 92) return '\\\\';
-    if (c === 123) return '\\{';
-    if (c === 125) return '\\}';
-    if (c < 128) return ch;
-    const signed = c > 32767 ? c - 65536 : c;
-    return `\\u${signed}?`;
-  }).join('');
+/* ── DOCX helpers (no external libs) ── */
+function escapeXml(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function crc32(u8){let c=-1;for(let i=0;i<u8.length;i++){c^=u8[i];for(let j=0;j<8;j++)c=(c>>>1)^(c&1?0xEDB88320:0);}return(c^-1)>>>0;}
+function makeZip(files){
+  const enc=new TextEncoder(),entries=[];let offset=0;
+  for(const{name,data}of files){
+    const nb=enc.encode(name),d=typeof data==='string'?enc.encode(data):data,crc=crc32(d);
+    const lh=new Uint8Array(30+nb.length+d.length);
+    const w=(v,p,n)=>{for(let i=0;i<n;i++)lh[p+i]=(v>>>(i*8))&0xFF;};
+    lh.set([80,75,3,4]);w(20,4,2);w(0,6,2);w(0,8,2);w(0,10,4);
+    w(crc,14,4);w(d.length,18,4);w(d.length,22,4);w(nb.length,26,2);w(0,28,2);
+    lh.set(nb,30);lh.set(d,30+nb.length);
+    entries.push({nb,d,crc,lh,offset});offset+=lh.length;
+  }
+  const cdOffset=offset;
+  const cds=entries.map(({nb,d,crc,offset})=>{
+    const cd=new Uint8Array(46+nb.length);
+    const w=(v,p,n)=>{for(let i=0;i<n;i++)cd[p+i]=(v>>>(i*8))&0xFF;};
+    cd.set([80,75,1,2]);w(20,4,2);w(20,6,2);w(0,8,2);w(0,10,2);w(0,12,4);
+    w(crc,16,4);w(d.length,20,4);w(d.length,24,4);w(nb.length,28,2);
+    w(0,30,6);w(0,36,2);w(0,38,4);w(offset,42,4);cd.set(nb,46);return cd;
+  });
+  const cdSize=cds.reduce((s,c)=>s+c.length,0),eocd=new Uint8Array(22);
+  const w=(v,p,n)=>{for(let i=0;i<n;i++)eocd[p+i]=(v>>>(i*8))&0xFF;};
+  eocd.set([80,75,5,6]);w(0,4,4);w(entries.length,8,2);w(entries.length,10,2);
+  w(cdSize,12,4);w(cdOffset,16,4);w(0,20,2);
+  const all=[...entries.map(e=>e.lh),...cds,eocd];
+  const total=all.reduce((s,a)=>s+a.length,0),out=new Uint8Array(total);
+  let pos=0;for(const a of all){out.set(a,pos);pos+=a.length;}return out;
 }
-// JPEG → PNG 변환 후 hex (Pages는 pngblip이 더 안정적)
-const jpegToRtfPng = (dataUrl) => new Promise(res => {
-  const img = new Image();
-  img.onload = () => {
-    const c = document.createElement('canvas');
-    c.width = c.height = 480;
-    c.getContext('2d').drawImage(img, 0, 0, 480, 480);
-    const b64 = c.toDataURL('image/png').split(',')[1];
-    const arr = b64ToArr(b64);
-    let hex = '';
-    for (let i = 0; i < arr.length; i++) hex += arr[i].toString(16).padStart(2,'0');
-    res(hex);
-  };
-  img.src = dataUrl;
-});
 
 /* ── Icons ── */
 const E = React.createElement;
@@ -332,64 +335,75 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(''), 2800);
   };
 
-  /* ── Export to .rtf (no external libs, Pages compatible) ── */
+  /* ── Export to .docx (Pages에서 바로 열림, 사진 포함) ── */
   const doExport = async (keySet) => {
     setExporting(true);
     showToast('📄 내보내기 준비 중...');
     try {
-      const curT = textRef.current, curP = photosRef.current, curK = activeKeyRef.current;
-      if (curT.trim() || curP.length) await DB.put({ id: curK, text: curT, photos: curP });
+      const curT=textRef.current,curP=photosRef.current,curK=activeKeyRef.current;
+      if(curT.trim()||curP.length) await DB.put({id:curK,text:curT,photos:curP});
 
       const allEntries = await DB.getAll();
-      const entries = keySet ? allEntries.filter(e => keySet.has(e.id)) : allEntries;
-      entries.sort((a, b) => a.id.localeCompare(b.id));
-      if (!entries.length) { showToast('선택된 일기가 없어요'); setExporting(false); return; }
+      const entries = keySet ? allEntries.filter(e=>keySet.has(e.id)) : allEntries;
+      entries.sort((a,b)=>a.id.localeCompare(b.id));
+      if(!entries.length){showToast('선택된 일기가 없어요');setExporting(false);return;}
 
-      const r = [];
-      r.push('{\\rtf1\\ansi\\ansicpg949\\deff0');
-      r.push('{\\fonttbl{\\f0\\fnil\\fcharset129 Apple SD Gothic Neo;}}');
-      r.push('{\\colortbl;\\red42\\green40\\blue38;\\red123\\green158\\blue135;\\red176\\green164\\blue154;}');
-      r.push('\\paperw11906\\paperh16838\\margl1800\\margr1800\\margt1800\\margb1800\\widowctrl');
-      r.push('');
-      r.push(`\\pard\\qc\\f0\\fs52\\b\\cf2 ${toRtfStr('나의 일기')}\\par`);
-      r.push('\\pard\\par\\pard\\par');
+      const imgs=[];let imgN=0;
+      const body=[];
 
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i];
-        if (i > 0) r.push('\\pard\\par\\pard\\par');
-        r.push(`\\pard\\f0\\fs28\\b\\cf2 ${toRtfStr(korDate(entry.id))}\\par`);
-        r.push('\\pard\\brdrb\\brdrs\\brdrw8\\brdrcf3\\brdrsp60\\fs4  \\par');
-        r.push('\\pard\\par');
-        if (entry.photos?.length) {
-          for (const dataUrl of entry.photos) {
-            const hex = await jpegToRtfPng(dataUrl);
-            r.push(`\\pard{\\pict\\pngblip\\picw480\\pich480\\picwgoal3000\\pichgoal3000 ${hex}}\\par`);
-            r.push('\\pard\\par');
-          }
+      // 제목
+      body.push(`<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="400"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="7B9E87"/><w:sz w:val="52"/></w:rPr><w:t>나의 일기</w:t></w:r></w:p>`);
+
+      for(const entry of entries){
+        // 날짜
+        body.push(`<w:p><w:pPr><w:spacing w:before="480" w:after="120"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="7B9E87"/><w:sz w:val="28"/></w:rPr><w:t>${escapeXml(korDate(entry.id))}</w:t></w:r></w:p>`);
+        // 구분선
+        body.push(`<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="4" w:space="1" w:color="E8DDD0"/></w:pBdr><w:spacing w:after="160"/></w:pPr></w:p>`);
+
+        // 사진
+        for(const src of (entry.photos||[])){
+          imgN++;
+          const rId=`rId${100+imgN}`;
+          imgs.push({n:imgN,rId,data:b64ToArr(src.split(',')[1])});
+          const emu=2160000;
+          body.push(`<w:p><w:pPr><w:spacing w:after="120"/></w:pPr><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${emu}" cy="${emu}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${imgN}" name="Img${imgN}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${imgN}" name="Img${imgN}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu}" cy="${emu}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`);
         }
-        if (entry.text?.trim()) {
-          for (const line of entry.text.split('\n'))
-            r.push(`\\pard\\f0\\fs24\\b0\\cf1 ${toRtfStr(line||' ')}\\par`);
+
+        // 글
+        if(entry.text?.trim()){
+          for(const line of entry.text.split('\n'))
+            body.push(`<w:p><w:pPr><w:spacing w:after="60"/></w:pPr><w:r><w:rPr><w:sz w:val="24"/><w:color w:val="2A2826"/></w:rPr><w:t xml:space="preserve">${escapeXml(line||' ')}</w:t></w:r></w:p>`);
         } else {
-          r.push(`\\pard\\f0\\fs22\\b0\\i\\cf3 ${toRtfStr('(내용 없음)')}\\par`);
+          body.push(`<w:p><w:r><w:rPr><w:sz w:val="22"/><w:color w:val="B0A49A"/><w:i/></w:rPr><w:t>(내용 없음)</w:t></w:r></w:p>`);
         }
       }
-      r.push('}');
 
-      const blob = new Blob([r.join('\n')], {type:'application/rtf'});
-      const filename = `일기_${toKey(new Date()).replace(/-/g,'')}.rtf`;
-      const file = new File([blob], filename, {type:'application/rtf'});
-      if (navigator.share && navigator.canShare?.({files:[file]})) {
-        await navigator.share({files:[file], title:'나의 일기'});
+      const docXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><w:body>${body.join('')}<w:sectPr><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`;
+      const relsXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${imgs.map(i=>`<Relationship Id="${i.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${i.n}.jpeg"/>`).join('')}</Relationships>`;
+      const ctXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;
+      const rootRels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+
+      const zipBytes=makeZip([
+        {name:'[Content_Types].xml',data:ctXml},
+        {name:'_rels/.rels',data:rootRels},
+        {name:'word/document.xml',data:docXml},
+        {name:'word/_rels/document.xml.rels',data:relsXml},
+        ...imgs.map(i=>({name:`word/media/image${i.n}.jpeg`,data:i.data}))
+      ]);
+
+      const blob=new Blob([zipBytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+      const filename=`일기_${toKey(new Date()).replace(/-/g,'')}.docx`;
+      const file=new File([blob],filename,{type:blob.type});
+      if(navigator.share&&navigator.canShare?.({files:[file]})){
+        await navigator.share({files:[file],title:'나의 일기'});
       } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename; a.click();
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');a.href=url;a.download=filename;a.click();
         URL.revokeObjectURL(url);
       }
       showToast(`✓ ${entries.length}개 내보내기 완료`);
-    } catch(e) {
-      if (e.name !== 'AbortError') showToast('내보내기 실패: ' + e.message);
+    } catch(e){
+      if(e.name!=='AbortError') showToast('내보내기 실패: '+e.message);
       else showToast('');
     }
     setExporting(false);
