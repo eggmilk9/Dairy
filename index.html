@@ -103,6 +103,13 @@
     .rec{animation:mic-pulse 1.5s ease infinite;border-radius:10px}
 
     .loading{min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#F2EEE7;font-size:14px;color:#B0A49A}
+
+    /* Entry navigation */
+    .nav-row{display:flex;align-items:center;justify-content:space-between;padding-top:10px;margin-top:6px;border-top:1px solid #F0E8DE}
+    .nav-btn{background:none;border:none;cursor:pointer;color:#C8BBAF;padding:6px 12px;border-radius:8px;display:flex;align-items:center;justify-content:center;min-width:44px;min-height:36px;transition:color .15s,background .15s}
+    .nav-btn:not(:disabled):active{background:#EDE7DF;color:#2A2826}
+    .nav-btn:disabled{opacity:.25;cursor:default}
+    .nav-pos{font-size:11px;color:#C8BBAF;letter-spacing:.03em}
   </style>
 </head>
 <body>
@@ -463,6 +470,12 @@ function App() {
     return cells;
   };
 
+  /* Entry navigation */
+  const sortedKeys = [...entryKeys].sort();
+  const curIdx     = sortedKeys.indexOf(activeKey);
+  const prevKey    = curIdx > 0 ? sortedKeys[curIdx - 1] : null;
+  const nextKey    = curIdx >= 0 && curIdx < sortedKeys.length - 1 ? sortedKeys[curIdx + 1] : null;
+
   if (loading) return E('div', {className:'loading'}, '불러오는 중...');
 
   return E('div', {className:'wrap'},
@@ -511,6 +524,22 @@ function App() {
         E('span', {className:`save-txt${saveState==='saved'?' save-ok':''}`},
           saveState==='saving' ? '저장 중...' : saveState==='saved' ? '✓ 저장됨' : ''
         )
+      ),
+
+      activeKey !== todayKey && sortedKeys.length > 1 && E('div', {className:'nav-row'},
+        E('button', {
+          className:'nav-btn', disabled:!prevKey,
+          onClick: () => prevKey && setActiveKey(prevKey),
+          'aria-label':'이전 일기'
+        }, E(ChL)),
+        E('span', {className:'nav-pos'},
+          curIdx >= 0 ? `${curIdx + 1} / ${sortedKeys.length}` : ''
+        ),
+        E('button', {
+          className:'nav-btn', disabled:!nextKey,
+          onClick: () => nextKey && setActiveKey(nextKey),
+          'aria-label':'다음 일기'
+        }, E(ChR))
       )
     ),
 
