@@ -40,7 +40,7 @@
     .photo-del{position:absolute;top:8px;right:8px;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.55);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;opacity:0;transform:scale(.6);transition:opacity .18s,transform .18s;pointer-events:none}
     .photo-del.show{opacity:1;transform:scale(1);pointer-events:auto}
 
-    textarea{width:100%;flex:1;min-height:140px;border:none;outline:none;background:transparent;font-family:'Noto Sans KR',sans-serif;font-size:15px;line-height:1.85;color:#2A2826;resize:none;padding:0}
+    textarea{width:100%;min-height:140px;height:140px;border:none;outline:none;background:transparent;font-family:'Noto Sans KR',sans-serif;font-size:15px;line-height:1.85;color:#2A2826;resize:none;padding:0;overflow:hidden;display:block}
     textarea::placeholder{color:#C8BBAF}
 
     .divider{height:1px;background:#E8DDD0;margin:14px 0 12px}
@@ -228,6 +228,7 @@ function App() {
   const [pendingKeys, setPendingKeys] = useState(null);
 
   const fileRef      = useRef(null);
+  const textareaRef  = useRef(null);
   const recRef       = useRef(null);
   const finalRef     = useRef('');
   const saveTimer    = useRef(null);
@@ -296,6 +297,16 @@ function App() {
     skipSave.current = true;
     DB.get(activeKey).then(entry => { setText(entry?.text || ''); setPhotos(entry?.photos || []); }).catch(() => { setText(''); setPhotos([]); });
   }, [activeKey]);
+
+  /* Auto-grow textarea so it never scrolls internally — the whole card/page scrolls instead */
+  const autoGrow = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.max(el.scrollHeight, 140) + 'px';
+  }, []);
+
+  useEffect(() => { autoGrow(); }, [text, photos.length, loading, activeKey, autoGrow]);
 
   /* Photos */
   const cropSquare = f => new Promise(res => {
@@ -505,8 +516,10 @@ function App() {
       ),
 
       E('textarea', {
+        ref: textareaRef,
         value: text,
-        onChange: ev => !recording && setText(ev.target.value),
+        onChange: ev => { if (!recording) setText(ev.target.value); autoGrow(); },
+        onInput: autoGrow,
         placeholder: recording ? '🎙 듣고 있어요...' : activeKey === todayKey ? '오늘 하루를 기록해 보세요...' : '이날의 기억을 적어보세요...',
       }),
 
