@@ -20,7 +20,7 @@
     textarea{-webkit-user-select:text;user-select:text}
 
     .wrap{min-height:100dvh;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px calc(28px + env(safe-area-inset-bottom));background:#F2EEE7}
-    .card{background:#FAF8F3;border-radius:20px;padding:24px 22px 18px;width:100%;max-width:440px;box-shadow:0 2px 20px rgba(44,40,36,.07)}
+    .card{background:#FAF8F3;border-radius:20px;padding:24px 22px 18px;width:100%;max-width:440px;box-shadow:0 2px 20px rgba(44,40,36,.07);display:flex;flex-direction:column;min-height:calc(100dvh - 96px)}
 
     .hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;gap:8px}
     .date-label{font-size:10px;color:#C8A87A;letter-spacing:.1em;font-weight:500;margin-bottom:5px}
@@ -32,15 +32,15 @@
     .back-today{background:rgba(123,158,135,.12);border:none;cursor:pointer;color:#7B9E87;font-family:'Noto Sans KR',sans-serif;font-size:12px;font-weight:500;padding:6px 11px;border-radius:20px;white-space:nowrap}
 
     /* Photos */
-    .photo-strip{display:flex;gap:10px;margin-bottom:18px;width:100%}
+    .photo-strip{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px;width:100%}
     .photo-strip.single .photo-box{width:100%}
-    .photo-strip.double .photo-box{width:calc(50% - 5px)}
+    .photo-strip.multi .photo-box{width:calc(50% - 4px)}
     .photo-box{position:relative;aspect-ratio:1/1;border-radius:14px;overflow:hidden;flex-shrink:0;-webkit-touch-callout:none;user-select:none}
     .photo-box img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
     .photo-del{position:absolute;top:8px;right:8px;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.55);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;opacity:0;transform:scale(.6);transition:opacity .18s,transform .18s;pointer-events:none}
     .photo-del.show{opacity:1;transform:scale(1);pointer-events:auto}
 
-    textarea{width:100%;min-height:200px;border:none;outline:none;background:transparent;font-family:'Noto Sans KR',sans-serif;font-size:15px;line-height:1.85;color:#2A2826;resize:none;padding:0}
+    textarea{width:100%;flex:1;min-height:140px;border:none;outline:none;background:transparent;font-family:'Noto Sans KR',sans-serif;font-size:15px;line-height:1.85;color:#2A2826;resize:none;padding:0}
     textarea::placeholder{color:#C8BBAF}
 
     .divider{height:1px;background:#E8DDD0;margin:14px 0 12px}
@@ -315,10 +315,9 @@ function App() {
   });
 
   const handlePhotos = async e => {
-    const files = [...e.target.files], slots = 2 - photos.length;
-    if (!slots) return;
-    const processed = await Promise.all(files.slice(0, slots).map(cropSquare));
-    setPhotos(p => [...p, ...processed].slice(0, 2));
+    const files = [...e.target.files];
+    const processed = await Promise.all(files.map(cropSquare));
+    setPhotos(p => [...p, ...processed]);
     e.target.value = '';
   };
 
@@ -492,7 +491,7 @@ function App() {
         )
       ),
 
-      photos.length > 0 && E('div', {className:`photo-strip${photos.length===1?' single':' double'}`},
+      photos.length > 0 && E('div', {className:`photo-strip${photos.length === 1 ? ' single' : ' multi'}`},
         photos.map((src, i) => E('div', {key:i, className:'photo-box',
           onTouchStart:()=>startLP(i), onTouchEnd:cancelLP, onTouchMove:cancelLP,
           onMouseDown:()=>startLP(i), onMouseUp:cancelLP, onMouseLeave:cancelLP,
@@ -517,8 +516,12 @@ function App() {
         E('div', {className: recording ? 'rec' : ''},
           E('button', {className:'icon-btn', style:{color:recording?'#7B9E87':''}, onClick:toggleRec, 'aria-label':recording?'중지':'음성 입력'}, E(MicIcon, {on:recording}))
         ),
-        photos.length < 2 && E('span', null,
-          E('button', {className:'icon-btn', onClick:()=>fileRef.current?.click(), 'aria-label':'사진 추가'}, E(ImgIcon)),
+        E('span', null,
+          E('button', {
+            className:'icon-btn',
+            onClick: () => fileRef.current?.click(),
+            'aria-label':'사진 추가'
+          }, E(ImgIcon)),
           E('input', {ref:fileRef, type:'file', accept:'image/*', multiple:true, style:{display:'none'}, onChange:handlePhotos})
         ),
         E('span', {className:`save-txt${saveState==='saved'?' save-ok':''}`},
