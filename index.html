@@ -32,15 +32,22 @@
     .back-today{background:rgba(123,158,135,.12);border:none;cursor:pointer;color:#7B9E87;font-family:'Noto Sans KR',sans-serif;font-size:12px;font-weight:500;padding:6px 11px;border-radius:20px;white-space:nowrap}
 
     /* Photos */
-    .photo-strip{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px;width:100%}
-    .photo-strip.single .photo-box{width:100%}
-    .photo-strip.multi .photo-box{width:calc(50% - 4px)}
-    .photo-box{position:relative;aspect-ratio:1/1;border-radius:14px;overflow:hidden;flex-shrink:0;-webkit-touch-callout:none;user-select:none}
-    .photo-box img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+    .photo-strip,.photo-strip *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+    .photo-strip{display:grid;gap:8px;margin-bottom:18px;width:100%;flex-shrink:0}
+    .photo-strip.single{grid-template-columns:1fr}
+    .photo-strip.multi{grid-template-columns:1fr 1fr}
+    .photo-box{position:relative;width:100%;border-radius:14px;overflow:hidden;cursor:zoom-in}
+    .photo-box::before{content:'';display:block;padding-top:100%}
+    .photo-box img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none}
+
+    /* Lightbox */
+    .lightbox{position:fixed;inset:0;background:rgba(20,18,16,.92);z-index:300;display:flex;align-items:center;justify-content:center;padding:calc(20px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom))}
+    .lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;display:block}
+    .lightbox-x{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.15);border:none;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer}
     .photo-del{position:absolute;top:8px;right:8px;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.55);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;opacity:0;transform:scale(.6);transition:opacity .18s,transform .18s;pointer-events:none}
     .photo-del.show{opacity:1;transform:scale(1);pointer-events:auto}
 
-    textarea{width:100%;min-height:140px;height:140px;border:none;outline:none;background:transparent;font-family:'Noto Sans KR',sans-serif;font-size:15px;line-height:1.85;color:#2A2826;resize:none;padding:0;overflow:hidden;display:block}
+    textarea{width:100%;flex:1;min-height:140px;border:none;outline:none;background:transparent;font-family:'Noto Sans KR',sans-serif;font-size:15px;line-height:1.85;color:#2A2826;resize:none;padding:0}
     textarea::placeholder{color:#C8BBAF}
 
     .divider{height:1px;background:#E8DDD0;margin:14px 0 12px}
@@ -156,6 +163,8 @@ function korDate(k) {
   const [y,m,d] = k.split('-').map(Number);
   return `${y}년 ${m}월 ${d}일 ${WD[new Date(y,m-1,d).getDay()]}요일`;
 }
+const thumbOf = p => typeof p === 'string' ? p : p.t;
+const fullOf  = p => typeof p === 'string' ? p : (p.f || p.t);
 function b64ToArr(b64) {
   const bin = atob(b64); const arr = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
@@ -226,9 +235,10 @@ function App() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportName, setExportName] = useState('');
   const [pendingKeys, setPendingKeys] = useState(null);
+  const [viewIdx, setViewIdx] = useState(null);
+  const lpFired = useRef(false);
 
   const fileRef      = useRef(null);
-  const textareaRef  = useRef(null);
   const recRef       = useRef(null);
   const finalRef     = useRef('');
   const saveTimer    = useRef(null);
@@ -298,16 +308,6 @@ function App() {
     DB.get(activeKey).then(entry => { setText(entry?.text || ''); setPhotos(entry?.photos || []); }).catch(() => { setText(''); setPhotos([]); });
   }, [activeKey]);
 
-  /* Auto-grow textarea so it never scrolls internally — the whole card/page scrolls instead */
-  const autoGrow = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = Math.max(el.scrollHeight, 140) + 'px';
-  }, []);
-
-  useEffect(() => { autoGrow(); }, [text, photos.length, loading, activeKey, autoGrow]);
-
   /* Photos */
   const cropSquare = f => new Promise(res => {
     const fr = new FileReader();
@@ -318,7 +318,12 @@ function App() {
         const ss = Math.min(img.width, img.height), sz = Math.min(ss, 480);
         c.width = c.height = sz;
         c.getContext('2d').drawImage(img,(img.width-ss)/2,(img.height-ss)/2,ss,ss,0,0,sz,sz);
-        res(c.toDataURL('image/jpeg', .72));
+        const t = c.toDataURL('image/jpeg', .72);
+        const sc = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const c2 = document.createElement('canvas');
+        c2.width = Math.round(img.width*sc); c2.height = Math.round(img.height*sc);
+        c2.getContext('2d').drawImage(img,0,0,c2.width,c2.height);
+        res({t, f: c2.toDataURL('image/jpeg', .82)});
       };
       img.src = ev.target.result;
     };
@@ -354,7 +359,7 @@ function App() {
   };
 
   /* Long-press delete */
-  const startLP = i => { lpTimer.current = setTimeout(() => { setDelIdx(i); if (navigator.vibrate) navigator.vibrate(40); }, 550); };
+  const startLP = i => { lpFired.current = false; lpTimer.current = setTimeout(() => { lpFired.current = true; setDelIdx(i); if (navigator.vibrate) navigator.vibrate(40); }, 550); };
   const cancelLP = () => clearTimeout(lpTimer.current);
   const dismissDel = ev => { if (!ev.target.closest?.('.photo-box')) setDelIdx(null); };
 
@@ -391,7 +396,8 @@ function App() {
         body.push(`<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="4" w:space="1" w:color="E8DDD0"/></w:pBdr><w:spacing w:after="160"/></w:pPr></w:p>`);
 
         // 사진
-        for(const src of (entry.photos||[])){
+        for(const ph of (entry.photos||[])){
+          const src=thumbOf(ph);
           imgN++;
           const rId=`rId${100+imgN}`;
           imgs.push({n:imgN,rId,data:b64ToArr(src.split(',')[1])});
@@ -507,8 +513,12 @@ function App() {
           onTouchStart:()=>startLP(i), onTouchEnd:cancelLP, onTouchMove:cancelLP,
           onMouseDown:()=>startLP(i), onMouseUp:cancelLP, onMouseLeave:cancelLP,
           onContextMenu:ev=>{ev.preventDefault();startLP(i);},
-          onClick:()=>{if(delIdx===i)setDelIdx(null);}},
-          E('img', {src, alt:'', draggable:false}),
+          onClick:()=>{
+            if(lpFired.current){lpFired.current=false;return;}
+            if(delIdx!==null){setDelIdx(null);return;}
+            setViewIdx(i);
+          }},
+          E('img', {src:thumbOf(src), alt:'', draggable:false}),
           E('button', {className:`photo-del${delIdx===i?' show':''}`, 'aria-label':'사진 삭제',
             onClick:ev=>{ev.stopPropagation();setPhotos(p=>p.filter((_,j)=>j!==i));setDelIdx(null);}},
             E(XIcon, {s:15}))
@@ -516,10 +526,8 @@ function App() {
       ),
 
       E('textarea', {
-        ref: textareaRef,
         value: text,
-        onChange: ev => { if (!recording) setText(ev.target.value); autoGrow(); },
-        onInput: autoGrow,
+        onChange: ev => !recording && setText(ev.target.value),
         placeholder: recording ? '🎙 듣고 있어요...' : activeKey === todayKey ? '오늘 하루를 기록해 보세요...' : '이날의 기억을 적어보세요...',
       }),
 
@@ -606,6 +614,11 @@ function App() {
           }, '내보내기')
         )
       )
+    ),
+
+    viewIdx!==null && photos[viewIdx] && E('div', {className:'lightbox', onClick:()=>setViewIdx(null)},
+      E('img', {src:fullOf(photos[viewIdx]), alt:''}),
+      E('button', {className:'lightbox-x', 'aria-label':'닫기', onClick:()=>setViewIdx(null)}, E(XIcon, {s:18}))
     ),
 
     E('div', {className:`toast${toast?' show':''}`}, toast),
